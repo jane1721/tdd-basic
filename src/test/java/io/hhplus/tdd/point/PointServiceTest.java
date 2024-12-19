@@ -2,9 +2,7 @@ package io.hhplus.tdd.point;
 
 import io.hhplus.tdd.database.PointHistoryTable;
 import io.hhplus.tdd.database.UserPointTable;
-import io.hhplus.tdd.exception.ExceedingChargeException;
-import io.hhplus.tdd.exception.InvalidChargeAmountException;
-import io.hhplus.tdd.exception.InvalidUserIdException;
+import io.hhplus.tdd.exception.*;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
@@ -230,6 +228,95 @@ public class PointServiceTest {
 
             // when
             UserPoint actualUserPoint = pointService.charge(userId, chargeAmount);
+
+            // then
+            assertThat(actualUserPoint).isEqualTo(expectedUserPoint);
+        }
+    }
+
+    @Nested
+    @DisplayName("use - 특정 유저의 포인트를 사용하는 기능")
+    class UseTest {
+
+        /**
+         * 4. 특정 유저의 포인트를 사용하는 기능
+         *  - 잘못된 형식(자연수가 아닐 때)의 사용자 ID 로 요청 시 Exception 이 발생한다.
+         *  - 사용 금액이 0 또는 음수일 때, Exception 이 발생한다.
+         *  - 사용 후 포인트가 음수일 때, Exception 이 발생한다.
+         *  - 그 외 케이스의 경우(사용 금액이 0 보다 크고, 사용 후 포인트가 0 이상일 때), 해당 사용자의 사용 후 포인트 데이터를 반환한다.
+         */
+
+        @DisplayName("잘못된 형식(자연수가 아닐 때)의 사용자 ID 로 요청 시 Exception 이 발생한다.")
+        @Test
+        void useNonUserPointFail() throws Exception {
+            // given
+            final long negativeUserId = -1L;
+            final long zeroUserId = 0;
+
+            // when
+            // then
+            assertThrows(
+                    InvalidUserIdException.class,
+                    () -> pointService.use(negativeUserId, 1_000L)
+            );
+
+            assertThrows(
+                    InvalidUserIdException.class,
+                    () -> pointService.use(zeroUserId, 1_000L)
+            );
+        }
+
+        @DisplayName("사용 금액이 0 또는 음수일 때, Exception 이 발생한다.")
+        @Test
+        void useInvalidAmountFail() throws Exception {
+            // given
+            final long userId = 1L;
+            final long negativeAmount = -1_000L;
+            final long zeroAmount = 0L;
+
+            // when
+            // then
+            assertThrows(
+                    InvalidUseAmountException.class,
+                    () -> pointService.use(userId, negativeAmount)
+            );
+
+            assertThrows(
+                    InvalidUseAmountException.class,
+                    () -> pointService.use(userId, zeroAmount)
+            );
+        }
+
+        @DisplayName("사용 후 포인트가 음수일 때, Exception 이 발생한다.")
+        @Test
+        void useExceedingAmountFail() throws Exception {
+            // given
+            final long userId = 1L;
+            final long originalUserPoint = 1_000L;
+            final long chargeAmount = 1_001L;
+            given(userPointTable.selectById(userId)).willReturn(new UserPoint(userId, originalUserPoint - chargeAmount, System.currentTimeMillis()));
+
+            // when
+            // then
+            assertThrows(
+                    ExceedingUseException.class,
+                    () -> pointService.use(userId, chargeAmount)
+            );
+        }
+
+        @DisplayName("그 외 케이스의 경우(사용 금액이 0 보다 크고, 사용 후 포인트가 0 이상일 때), 해당 사용자의 사용 후 포인트 데이터를 반환한다.")
+        @Test
+        void useValidAmountSuccess() throws Exception {
+            // given
+            final long userId = 1L;
+            final long originalAmount = 8_000L;
+            final long useAmount = 5_000L;
+            UserPoint expectedUserPoint = new UserPoint(userId, originalAmount - useAmount, System.currentTimeMillis());
+            given(userPointTable.selectById(userId)).willReturn(new UserPoint(userId, originalAmount, System.currentTimeMillis()));
+            given(userPointTable.insertOrUpdate(userId, originalAmount - useAmount)).willReturn(expectedUserPoint);
+
+            // when
+            UserPoint actualUserPoint = pointService.use(userId, useAmount);
 
             // then
             assertThat(actualUserPoint).isEqualTo(expectedUserPoint);
