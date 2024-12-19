@@ -7,6 +7,8 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 
 import java.util.List;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.locks.ReentrantLock;
 
 @RequiredArgsConstructor
 @Service
@@ -14,6 +16,7 @@ public class PointService {
 
     private final UserPointTable userPointTable;
     private final PointHistoryTable pointHistoryTable;
+    private final ConcurrentHashMap<Long, ReentrantLock> userLocks = new ConcurrentHashMap<>(); // 유저 ID 별로 Lock 을 관리
 
     /**
      * 특정 유저의 포인트를 조회하는 기능
@@ -64,17 +67,25 @@ public class PointService {
             throw new InvalidChargeAmountException();
         }
 
-        UserPoint originalUserPoint = userPointTable.selectById(userId);
+        ReentrantLock lock = userLocks.computeIfAbsent(userId, id -> new ReentrantLock());
+        lock.lock(); // 유저 락 설정
 
-        if (originalUserPoint.point() + amount > 10_000_000) {
-            throw new ExceedingChargeException();
+        try {
+            UserPoint originalUserPoint = userPointTable.selectById(userId);
+
+            if (originalUserPoint.point() + amount > 10_000_000) {
+                throw new ExceedingChargeException();
+            }
+
+            long updatedPoint = originalUserPoint.point() + amount;
+
+            pointHistoryTable.insert(userId, updatedPoint, TransactionType.CHARGE, System.currentTimeMillis());
+
+            return userPointTable.insertOrUpdate(userId, updatedPoint);
+
+        } finally {
+            lock.unlock(); // 유저 락 해제
         }
-
-        long updatedPoint = originalUserPoint.point() + amount;
-
-        pointHistoryTable.insert(userId, updatedPoint, TransactionType.CHARGE, System.currentTimeMillis());
-
-        return userPointTable.insertOrUpdate(userId, updatedPoint);
     }
 
     /**
@@ -96,16 +107,24 @@ public class PointService {
             throw new InvalidUseAmountException();
         }
 
-        UserPoint originalUserPoint = userPointTable.selectById(userId);
+        ReentrantLock lock = userLocks.computeIfAbsent(userId, id -> new ReentrantLock());
+        lock.lock(); // 유저 락 설정
 
-        long updatedPoint = originalUserPoint.point() - amount;
+        try {
+            UserPoint originalUserPoint = userPointTable.selectById(userId);
 
-        if (updatedPoint < 0) {
-            throw new ExceedingUseException();
+            long updatedPoint = originalUserPoint.point() - amount;
+
+            if (updatedPoint < 0) {
+                throw new ExceedingUseException();
+            }
+
+            pointHistoryTable.insert(userId, updatedPoint, TransactionType.USE, System.currentTimeMillis());
+
+            return userPointTable.insertOrUpdate(userId, updatedPoint);
+
+        } finally {
+            lock.unlock(); // 유저 락 해제
         }
-
-        pointHistoryTable.insert(userId, updatedPoint, TransactionType.USE, System.currentTimeMillis());
-
-        return userPointTable.insertOrUpdate(userId, updatedPoint);
     }
 }
